@@ -1,0 +1,523 @@
+// Copyright (C) 2007 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//
+// Definitions for building the Java library and associated tests.
+//
+
+// libcore has some sub-directories that follow a common structure:
+// e.g. dalvik, dom, harmony-tests, json, jsr166-tests, luni, libart, ojluni,
+// support, xml, xmlpull.
+//
+// The structure of these is generally:
+//
+//   src/
+//       main/               # To be shipped on every device.
+//            java/          # Java source for library code.
+//            native/        # C/C++ source for library code.
+//            resources/     # Support files.
+//       test/               # Built only on demand, for testing.
+//            java/          # Java source for tests.
+//            native/        # C/C++ source for tests (rare).
+//            resources/     # Support files.
+//
+// All subdirectories are optional.
+
+build = [
+    "openjdk_java_files.bp",
+    "non_openjdk_java_files.bp",
+]
+
+// The Java files and their associated resources.
+core_resource_dirs = [
+    "luni/src/main/java",
+    "ojluni/src/main/resources/",
+]
+
+// The source files that go into core-oj.
+filegroup {
+    name: "core_oj_java_files",
+    srcs: [":openjdk_java_files"],
+}
+
+// OpenJDK source is not annotated with @hide so we need a separate
+// filegroup for just the parts that contribute to the API.
+filegroup {
+    name: "core_oj_api_files",
+    srcs: [":openjdk_javadoc_files"],
+}
+
+// The source files that go into core-libart.
+filegroup {
+    name: "core_libart_java_files",
+    srcs: [
+        ":non_openjdk_java_files",
+        ":android_icu4j_src_files",
+    ],
+}
+
+// Some parts of libart are not annotated with @hide so we need a separate
+// filegroup for just the parts that contribute to the API.
+filegroup {
+    name: "core_libart_api_files",
+    srcs: [
+        ":non_openjdk_javadoc_files",
+        ":android_icu4j_src_files",
+    ],
+}
+
+// The set of files in core that have been marked up with @hide and API-related
+// annotations.
+filegroup {
+    name: "core_api_files",
+    srcs: [
+        ":core_oj_api_files",
+        ":core_libart_api_files",
+        ":core_simple_java_files",
+    ],
+}
+
+java_defaults {
+    name: "libcore_java_defaults",
+    javacflags: [
+        //"-Xlint:all",
+        //"-Xlint:-serial,-deprecation,-unchecked",
+    ],
+    dxflags: ["--core-library"],
+    errorprone: {
+        javacflags: [
+            "-Xep:MissingOverride:OFF",  // Ignore missing @Override.
+            "-Xep:ConstantOverflow:WARN",  // Known constant overflow in SplittableRandom
+        ],
+    },
+}
+
+//
+// Build for the target (device).
+//
+
+java_library {
+    name: "core-all",
+    defaults: ["libcore_java_defaults"],
+
+    srcs: [
+        ":core_oj_java_files",
+        ":core_libart_java_files",
+        ":core_simple_java_files",
+        ":openjdk_lambda_stub_files",
+    ],
+
+    no_standard_libs: true,
+    system_modules: "none",
+    openjdk9: {
+        srcs: ["luni/src/module/java/module-info.java"],
+        javacflags: ["--patch-module=java.base=."],
+    },
+
+    java_resource_dirs: core_resource_dirs,
+    java_resources: [":android_icu4j_resources"],
+
+    required: [
+        "tzdata",
+        "tzlookup.xml",
+    ],
+
+    installable: false,
+}
+
+java_system_modules {
+    name: "core-all-system-modules",
+    libs: ["core-all"],
+}
+
+java_library {
+    name: "core-oj",
+    defaults: ["libcore_java_defaults"],
+    installable: true,
+    hostdex: true,
+
+    srcs: [":core_oj_java_files"],
+    java_resource_dirs: core_resource_dirs,
+
+    no_standard_libs: true,
+    libs: ["core-all"],
+    system_modules: "core-all-system-modules",
+    openjdk9: {
+        javacflags: ["--patch-module=java.base=."],
+    },
+
+    jacoco: {
+        exclude_filter: [
+            "java.lang.Class",
+            "java.lang.Long",
+            "java.lang.Number",
+            "java.lang.Object",
+            "java.lang.String",
+            "java.lang.invoke.MethodHandle",
+            "java.lang.ref.Reference",
+            "java.lang.reflect.Proxy",
+            "java.util.AbstractMap",
+            "java.util.HashMap",
+            "java.util.HashMap$Node",
+            "java.util.Map",
+        ],
+    },
+
+    notice: "ojluni/NOTICE",
+
+    required: [
+        "tzdata",
+        "tzlookup.xml",
+    ],
+
+}
+
+// Definitions to make the core library.
+java_library {
+    name: "core-libart",
+    defaults: ["libcore_java_defaults"],
+    installable: true,
+    hostdex: true,
+
+    srcs: [":core_libart_java_files"],
+    java_resources: [":android_icu4j_resources"],
+
+    no_standard_libs: true,
+    libs: ["core-all"],
+    system_modules: "core-all-system-modules",
+    openjdk9: {
+        javacflags: ["--patch-module=java.base=."],
+    },
+
+    jacoco: {
+        exclude_filter: [
+            "java.lang.DexCache",
+            "dalvik.system.ClassExt",
+        ],
+    },
+
+    required: [
+        "tzdata",
+        "tzlookup.xml",
+    ],
+}
+
+// A guaranteed unstripped version of core-oj and core-libart.
+// The build system may or may not strip the core-oj and core-libart jars,
+// but these will not be stripped. See b/24535627.
+java_library {
+    name: "core-oj-testdex",
+    installable: true,
+    static_libs: ["core-oj"],
+    no_standard_libs: true,
+    libs: ["core-all"],
+    system_modules: "core-all-system-modules",
+    dxflags: ["--core-library"],
+    dex_preopt: {
+        enabled: false,
+    },
+    notice: "ojluni/NOTICE",
+    required: [
+        "tzdata",
+        "tzlookup.xml",
+    ],
+}
+
+java_library {
+    name: "core-libart-testdex",
+    installable: true,
+    static_libs: ["core-libart"],
+    no_standard_libs: true,
+    libs: ["core-all"],
+    system_modules: "core-all-system-modules",
+    dxflags: ["--core-library"],
+    dex_preopt: {
+        enabled: false,
+    },
+    notice: "ojluni/NOTICE",
+    required: [
+        "tzdata",
+        "tzlookup.xml",
+    ],
+}
+
+// A library that exists to satisfy javac when
+// compiling source code that contains lambdas.
+java_library {
+    name: "core-lambda-stubs",
+    defaults: ["libcore_java_defaults"],
+
+    srcs: [
+        ":openjdk_lambda_stub_files",
+        ":openjdk_lambda_duplicate_stub_files",
+    ],
+
+    no_standard_libs: true,
+    libs: ["core-all"],
+    system_modules: "core-all-system-modules",
+    openjdk9: {
+        javacflags: ["--patch-module=java.base=."],
+    },
+
+    notice: "ojluni/NOTICE",
+
+    installable: false,
+    include_srcs: true,
+}
+
+// The libraries that make up core.
+java_system_modules {
+    name: "core-system-modules",
+    libs: [
+        "core-oj",
+        "core-libart",
+        "core-simple",
+        // This one is not on device but it's needed when javac compiles code
+        // containing lambdas.
+        "core-lambda-stubs"
+    ],
+}
+
+// Build libcore test rules
+java_library_static {
+    name: "core-test-rules",
+    hostdex: true,
+    no_framework_libs: true,
+    srcs: [
+        "dalvik/test-rules/src/main/**/*.java",
+        "test-rules/src/main/**/*.java",
+    ],
+    static_libs: ["junit"],
+}
+
+// Make the core-tests-support library.
+java_library_static {
+    name: "core-tests-support",
+    hostdex: true,
+    no_framework_libs: true,
+    srcs: ["support/src/test/java/**/*.java"],
+    libs: [
+        "junit",
+        "bouncycastle",
+    ],
+    static_libs: [
+        "bouncycastle-bcpkix",
+        "bouncycastle-ocsp",
+    ],
+}
+
+// Make the jsr166-tests library.
+java_test {
+    name: "jsr166-tests",
+    srcs: ["jsr166-tests/src/test/java/**/*.java"],
+    no_framework_libs: true,
+    libs: [
+        "junit",
+    ],
+}
+
+// Build a library just containing files from luni/src/test/filesystems for use in tests.
+java_library {
+    name: "filesystemstest",
+    compile_dex: true,
+    srcs: ["luni/src/test/filesystems/src/**/*.java"],
+    java_resource_dirs: ["luni/src/test/filesystems/resources"],
+    no_framework_libs: true,
+    errorprone: {
+        javacflags: ["-Xep:MissingOverride:OFF"],
+    },
+}
+
+// Build a library just containing files from luni/src/test/parameter_metadata for use in tests.
+java_library {
+    name: "parameter-metadata-test",
+    compile_dex: true,
+    srcs: ["luni/src/test/parameter_metadata/src/**/*.java"],
+    no_framework_libs: true,
+    javacflags: ["-parameters"],
+    errorprone: {
+        javacflags: ["-Xep:MissingOverride:OFF"],
+    },
+}
+
+// Make the core-tests library.
+java_test {
+    name: "core-tests",
+    defaults: ["libcore_java_defaults"],
+    hostdex: true,
+    no_framework_libs: true,
+    srcs: [
+        "dalvik/src/test/java/**/*.java",
+        "dalvik/test-rules/src/test/java/**/*.java",
+        "dom/src/test/java/**/*.java",
+        "harmony-tests/src/test/java/**/*.java",
+        "json/src/test/java/**/*.java",
+        "luni/src/test/java/**/*.java",
+        "xml/src/test/java/**/*.java",
+    ],
+    exclude_srcs: [
+        "luni/src/test/java/libcore/java/util/zip/Zip64Test.java",
+        "luni/src/test/java/libcore/java/util/zip/Zip64FileTest.java",
+    ],
+
+    java_resource_dirs: [
+        "*/src/test/java",
+        "*/src/test/resources",
+    ],
+    exclude_java_resource_dirs: [
+        "ojluni/src/test/java",
+        "ojluni/src/test/resources",
+    ],
+
+    java_resources: [
+        ":filesystemstest",
+        ":parameter-metadata-test",
+    ],
+
+    libs: [
+        "okhttp",
+        "bouncycastle",
+    ],
+    static_libs: [
+        "archive-patcher",
+        "core-test-rules",
+        "core-tests-support",
+        "junit-params",
+        "mockftpserver",
+        "mockito-target",
+        "mockwebserver",
+        "nist-pkix-tests",
+        "slf4j-jdk14",
+        "sqlite-jdbc",
+        "tzdata-testing",
+    ],
+
+    errorprone: {
+        javacflags: [
+            "-Xep:TryFailThrowable:ERROR",
+            "-Xep:ComparisonOutOfRange:ERROR",
+        ],
+    },
+
+    test_config: "AndroidTest-core-tests.xml",
+}
+
+// Make the core-ojtests library.
+java_test {
+    name: "core-ojtests",
+    defaults: ["libcore_java_defaults"],
+    hostdex: true,
+    no_framework_libs: true,
+
+    srcs: [
+        "ojluni/src/test/java/**/*.java",
+    ],
+    java_resource_dirs: [
+        "ojluni/src/test/java",
+        "ojluni/src/test/resources",
+    ],
+    libs: [
+        "okhttp",
+        "bouncycastle",
+    ],
+    static_libs: ["testng"],
+
+    // ojluni/src/test/java/util/stream/{bootlib,boottest}
+    // contains tests that are in packages from java.base;
+    // By default, OpenJDK 9's javac will only compile such
+    // code if it's declared to also be in java.base at
+    // compile time.
+    //
+    // For now, we use --patch-module to put all sources
+    // and dependencies from this make target into java.base;
+    // other source directories in this make target are in
+    // packages not from java.base; if this becomes a problem
+    // in future, this could be addressed eg. by splitting
+    // boot{lib,test} out into a separate make target,
+    // deleting those tests or moving them to a different
+    // package.
+    patch_module: "java.base",
+}
+
+// Make the core-ojtests-public library. Excludes any private API tests.
+java_test {
+    name: "core-ojtests-public",
+    defaults: ["libcore_java_defaults"],
+    no_framework_libs: true,
+    srcs: [
+        "ojluni/src/test/java/**/*.java",
+    ],
+    // Filter out the following:
+    // 1.) DeserializeMethodTest and SerializedLambdaTest, because they depends on stub classes
+    //     and won't actually run, and
+    // 2.) util/stream/boot*. Those directories contain classes in the package java.util.stream;
+    //     excluding them means we don't need patch_module: "java.base"
+    exclude_srcs: [
+        "**/DeserializeMethodTest.java",
+        "**/SerializedLambdaTest.java",
+        "ojluni/src/test/java/util/stream/boot*/**/*",
+    ],
+    java_resource_dirs: [
+        "ojluni/src/test/java",
+        "ojluni/src/test/resources",
+        // Include source code as part of JAR
+        "ojluni/src/test/dist",
+    ],
+    libs: [
+        "bouncycastle",
+        "okhttp",
+        "testng",
+    ],
+}
+
+// Make the annotated stubs in ojluni/annotations available to metalava:
+droiddoc_exported_dir {
+    name: "ojluni-annotated-sdk-stubs",
+    path: "ojluni/annotations/sdk",
+}
+
+// A file containing the list of tags that are "known" to us from the OpenJdk
+// source code and so should not cause an error or warning.
+filegroup {
+    name: "known-oj-tags",
+    srcs: [
+        "known_oj_tags.txt",
+    ],
+}
+
+// Stubs for the parts of the public SDK API provided by the core libraries.
+droidstubs {
+    name: "core-current-stubs-gen",
+    srcs: [":core_api_files"],
+    installable: false,
+    no_framework_libs: true,
+    args: " --exclude-annotations",
+}
+
+// A library containing the parts of the public SDK API provided by the core libraries.
+// Don't use this directly, use "sdk_version: core_current".
+java_library {
+    name: "core.current.stubs",
+    srcs: [":core-current-stubs-gen"],
+    errorprone: {
+        javacflags: [
+            "-Xep:MissingOverride:OFF",
+        ],
+    },
+    openjdk9: {
+        javacflags: ["--patch-module=java.base=."],
+    },
+    no_standard_libs: true,
+    system_modules: "none",
+}
